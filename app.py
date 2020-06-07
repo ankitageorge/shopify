@@ -1,9 +1,9 @@
 from flask import Flask, render_template, jsonify, request
 from elasticsearch import Elasticsearch
 from datetime import datetime
-import json
 from urllib.parse import urlparse
-
+from classes.image import Image
+import importlib
 
 # DEVELOPMENT_ENV  = True
 
@@ -13,19 +13,10 @@ es = Elasticsearch()
 
 @app.route('/', methods=['GET'])
 def index():
-	# results = es.get(index="images", id="1")
-	body = {
-		"query": {
-			"match_all": {
-			}
-		}
-	}
-
-	res = es.search(index="images", body=body)
-	images = get_images_info(res['hits']['hits'])
+	all_images = Image.load_all_images(es)
+	images = Image.get_images_info_for_display(all_images)
 
 	return render_template('index.html', images=images)
-    # return jsonify(results['_source'])
 
 
 @app.route('/new_image', methods=['GET','POST'])
@@ -35,21 +26,12 @@ def new_image():
 		tags = request.form['tags']
 		url = request.form['url']
 
-		if not title or not tags or not url:
-			message = "All fields are required for this form."
-			return render_template("error.html", message=message)
-		if not urlparse(url).scheme:
-			message = "Image url must be valid in the form."
-			return render_template("error.html", message=message)
+		try:
+			img = Image(title, tags, url)
+		except Exception as e:
+			return render_template("error.html", message=str(e))
 
-		body = {
-			'title': title,
-			'tags': tags.split(','),
-			'url': url,
-			'timestamp': datetime.now()
-		}
-
-		result = es.index(index='images', body=body)
+		img.add_to_db(es)
 
 		return render_template("success.html")
 	else:
@@ -58,10 +40,8 @@ def new_image():
 
 @app.route('/get_image/<image_id>', methods=['GET'])
 def get_image(image_id):
-	# id = request.view_args['image_id']
+	result = Image.get_by_id(es, image_id)
 	
-	result = es.get(index='images', id=image_id)
-	# vaPpgHIB6EquDrw2FnjL
 	return jsonify(result)
 
 
@@ -70,29 +50,15 @@ def search():
 	if request.method == 'POST':
 		keyword = request.form['keyword']
 
-		body = {
-			"query": {
-				"multi_match": {
-					"query": keyword,
-					"fields": ["title", "tags"],
-					"fuzziness": 5
-				}
-			}
-		}
+		result = Image.search(es, keyword)
 
-		res = es.search(index="images", body=body)
-
-		return display_images(res['hits']['hits'])
+		return jsonify(result) # load_images_for_display(result)
 	else:
 		return render_template('search.html')
 
 
-def get_images_info(results):
-	images = [[res['_source']['url'], res['_source']['title']] for res in results]
-	return images
-
-def display_images(results):
-	images = get_images_info(results)
+def load_images_for_display(results):
+	images = Image.get_images_info_for_display(results)
 
 	return render_template("gallery.html", images=images)
 
